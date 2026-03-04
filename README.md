@@ -120,13 +120,9 @@ sudo netfilter-persistent save
 
 ## 🚀 Быстрый старт
 
-### Установка одной командой
+### Установка
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/openwarpkit/warp-relay/main/wr.sh | sudo bash
-```
-
-Или скачайте и запустите скрипт:
+Скачайте и запустите скрипт:
 
 ```bash
 wget https://raw.githubusercontent.com/openwarpkit/warp-relay/main/wr.sh
