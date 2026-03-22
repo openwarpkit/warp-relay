@@ -2,8 +2,35 @@
 
 # Установка зависимостей
 export DEBIAN_FRONTEND=noninteractive
-apt update -qq
-apt install -y -qq iptables curl netfilter-persistent
+if command -v apt &>/dev/null; then
+    apt update -qq
+    apt install -y -qq iptables curl netfilter-persistent
+    SAVE_CMD="netfilter-persistent save"
+elif command -v dnf &>/dev/null; then
+    dnf install -y -q iptables curl iptables-services
+    SAVE_CMD="service iptables save"
+elif command -v yum &>/dev/null; then
+    yum install -y -q iptables curl iptables-services
+    SAVE_CMD="service iptables save"
+elif command -v pacman &>/dev/null; then
+    pacman -Syu --noconfirm iptables curl
+    mkdir -p /etc/iptables
+    SAVE_CMD="iptables-save > /etc/iptables/iptables.rules"
+    if systemctl list-unit-files | grep -q iptables.service; then
+        systemctl enable iptables --now 2>/dev/null || true
+    fi
+elif command -v apk &>/dev/null; then
+    apk add --no-cache iptables curl
+    mkdir -p /etc/iptables
+    SAVE_CMD="iptables-save > /etc/iptables/rules.v4"
+    mkdir -p /etc/local.d
+    echo "iptables-restore < /etc/iptables/rules.v4" > /etc/local.d/iptables.start
+    chmod +x /etc/local.d/iptables.start
+    rc-update add local default 2>/dev/null || true
+else
+    echo "Не поддерживаемый менеджер пакетов. Пожалуйста, установите iptables и curl самостоятельно."
+    exit 1
+fi
 
 export TAG="WR_RULE"
 export SRC_IP=$(curl -4s ifconfig.me)
