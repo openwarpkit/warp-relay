@@ -218,7 +218,7 @@ apply_nftables_rules() {
     nft add table ip filter 2>/dev/null || true
     nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; } 2>/dev/null || true
     nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; } 2>/dev/null || true
-    nft add chain ip filter forward { type filter hook forward priority 0 \; policy drop \; } 2>/dev/null || true
+    nft add chain ip filter forward { type filter hook forward priority filter \; policy accept \; } 2>/dev/null || true
 
     nft add set ip nat wr_port_set { type inet_service\; flags interval\; }
     nft add set ip filter wr_port_set { type inet_service\; flags interval\; }
