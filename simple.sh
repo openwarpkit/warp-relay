@@ -149,7 +149,17 @@ get_dst_ip() {
 }
 
 # IPT
+clean_iptables_rules() {
+    iptables -t nat -S | grep "${TAG}" | sed 's/^-A/-D/' | while read rule; do
+        iptables -t nat $rule 2>/dev/null
+    done
+    iptables -S | grep "${TAG}" | sed 's/^-A/-D/' | while read rule; do
+        iptables $rule 2>/dev/null
+    done
+}
+
 apply_iptables_rules() {
+    clean_iptables_rules
     iptables -t nat -A PREROUTING \
         -d ${SRC_IP} -p udp --dport ${SRC_PORT} \
         -j DNAT --to-destination ${DST_IP}:${DST_PORT} \
@@ -171,7 +181,18 @@ save_iptables_rules() {
 }
 
 # NFT
+clean_nftables_rules() {
+    for table in nat filter; do
+        for chain in prerouting postrouting forward; do
+            nft -a list chain ip $table $chain 2>/dev/null | grep -B1 "comment \"$TAG\"" | grep -o 'handle [0-9]*' | awk '{print $2}' | while read handle; do
+                nft delete rule ip $table $chain handle $handle 2>/dev/null
+            done
+        done
+    done
+}
+
 apply_nftables_rules() {
+    clean_nftables_rules
     nft add table ip nat 2>/dev/null || true
     nft add table ip filter 2>/dev/null || true
     nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; } 2>/dev/null || true
