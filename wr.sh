@@ -4,6 +4,10 @@ set -e
 TAG="WR_RULE"
 RULES_FILE="/etc/iptables/rules.v4"
 SYSCTL_FILE="/etc/sysctl.d/ipv4-forwarding.conf"
+DST_IP=$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')
+SRC_IP=$(curl -4s --max-time 3 ifconfig.me 2>/dev/null ||
+         curl -4s --max-time 3 icanhazip.com 2>/dev/null ||
+         curl -4s --max-time 3 api.ipify.org 2>/dev/null)
 # NFT
 FIREWALL_TYPE=""
 NFT_CONF="/etc/nftables.conf"
@@ -146,13 +150,6 @@ install_dependencies() {
     else
         echo "[*] Используется iptables"
     fi
-}
-
-detect_ips() {
-    SRC_IP=$(curl -4s --max-time 3 ifconfig.me 2>/dev/null ||
-             curl -4s --max-time 3 icanhazip.com 2>/dev/null ||
-             curl -4s --max-time 3 api.ipify.org 2>/dev/null)
-    DST_IP=$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')
 }
 
 enable_forward() {
@@ -330,7 +327,6 @@ while true; do
 
     case $choice in
         1)
-            detect_ips
             SRC_PORT=4500
             DST_PORT=4500
             echo "SRC_IP=${SRC_IP}"

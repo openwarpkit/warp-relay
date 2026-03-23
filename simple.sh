@@ -4,6 +4,10 @@ set -e
 TAG="WR_RULE"
 SRC_PORT=4500
 DST_PORT=4500
+DST_IP=$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')
+SRC_IP=$(curl -4s --max-time 3 ifconfig.me 2>/dev/null ||
+         curl -4s --max-time 3 icanhazip.com 2>/dev/null ||
+         curl -4s --max-time 3 api.ipify.org 2>/dev/null)
 # NFT
 FIREWALL_TYPE=""
 NFT_CONF="/etc/nftables.conf"
@@ -153,18 +157,6 @@ enable_ip_forwarding() {
     sysctl -w net.ipv4.ip_forward=1
 }
 
-get_src_ip() {
-    SRC_IP=$(curl -4s --max-time 3 ifconfig.me 2>/dev/null ||
-             curl -4s --max-time 3 icanhazip.com 2>/dev/null ||
-             curl -4s --max-time 3 api.ipify.org 2>/dev/null)
-    export SRC_IP
-}
-
-get_dst_ip() {
-    DST_IP=$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')
-    export DST_IP
-}
-
 # IPT
 clean_iptables_rules() {
     iptables -t nat -S | grep "${TAG}" | sed 's/^-A/-D/' | while read -r rule; do
@@ -238,8 +230,6 @@ save_nftables_rules() {
 main() {
     install_dependencies
     enable_ip_forwarding
-    get_src_ip
-    get_dst_ip
 
     if [ "$FIREWALL_TYPE" = "nftables" ]; then
         apply_nftables_rules
