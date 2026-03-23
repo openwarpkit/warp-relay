@@ -154,7 +154,9 @@ enable_ip_forwarding() {
 }
 
 get_src_ip() {
-    SRC_IP=$(curl -4s ifconfig.me)
+    SRC_IP=$(curl -4s --max-time 3 ifconfig.me 2>/dev/null ||
+             curl -4s --max-time 3 icanhazip.com 2>/dev/null ||
+             curl -4s --max-time 3 api.ipify.org 2>/dev/null)
     export SRC_IP
 }
 
