@@ -212,7 +212,7 @@ apply_nftables_rules() {
     nft add table ip filter 2>/dev/null || true
     nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; } 2>/dev/null || true
     nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; } 2>/dev/null || true
-    nft add chain ip filter forward { type filter hook forward priority filter \; policy accept \; } 2>/dev/null || true
+    nft add chain ip filter forward { type filter hook forward priority filter \; } 2>/dev/null || true
 
     nft add rule ip nat prerouting ip daddr $SRC_IP udp dport $SRC_PORT dnat to $DST_IP:$DST_PORT comment \"$TAG\"
     nft add rule ip nat postrouting ip daddr $DST_IP udp dport $DST_PORT masquerade comment \"$TAG\"
