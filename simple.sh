@@ -167,11 +167,11 @@ get_dst_ip() {
 
 # IPT
 clean_iptables_rules() {
-    iptables -t nat -S | grep "${TAG}" | sed 's/^-A/-D/' | while read rule; do
-        iptables -t nat $rule 2>/dev/null
+    iptables -t nat -S | grep "${TAG}" | sed 's/^-A/-D/' | while read -r rule; do
+        eval iptables -t nat "$rule" 2>/dev/null || true
     done
-    iptables -S | grep "${TAG}" | sed 's/^-A/-D/' | while read rule; do
-        iptables $rule 2>/dev/null
+    iptables -S | grep "${TAG}" | sed 's/^-A/-D/' | while read -r rule; do
+        eval iptables "$rule" 2>/dev/null || true
     done
 }
 
@@ -201,9 +201,15 @@ save_iptables_rules() {
 clean_nftables_rules() {
     for table in nat filter; do
         for chain in prerouting postrouting forward; do
-            nft -a list chain ip $table $chain 2>/dev/null | grep -B1 "comment \"$TAG\"" | grep -o 'handle [0-9]*' | awk '{print $2}' | while read handle; do
-                nft delete rule ip $table $chain handle $handle 2>/dev/null
-            done
+            nft -a list chain ip "$table" "$chain" 2>/dev/null | \
+                grep -B1 "comment \"$TAG\"" | \
+                grep -o 'handle [0-9]*' | \
+                awk '{print $2}' | \
+                while read -r handle; do
+                    if [[ "$handle" =~ ^[0-9]+$ ]]; then
+                        nft delete rule ip "$table" "$chain" handle "$handle" 2>/dev/null || true
+                    fi
+                done
         done
     done
 }
