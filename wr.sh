@@ -4,9 +4,16 @@ set -e
 TAG="WR_RULE"
 RULES_FILE="/etc/iptables/rules.v4"
 SYSCTL_FILE="/etc/sysctl.d/ipv4-forwarding.conf"
+DST_IP=$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')
+SRC_IP=$(curl -4s --max-time 3 ifconfig.me 2>/dev/null ||
+         curl -4s --max-time 3 icanhazip.com 2>/dev/null ||
+         curl -4s --max-time 3 api.ipify.org 2>/dev/null)
+SRC_PORT=4500
+DST_PORT=4500
 # NFT
 FIREWALL_TYPE=""
 NFT_CONF="/etc/nftables.conf"
+SAVE_CMD=""
 
 check_nftables() {
     command -v nft >/dev/null 2>&1 || return 1
@@ -148,11 +155,6 @@ install_dependencies() {
     fi
 }
 
-detect_ips() {
-    SRC_IP=$(curl -4s ifconfig.me)
-    DST_IP=$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')
-}
-
 enable_forward() {
     echo "net.ipv4.ip_forward=1" > ${SYSCTL_FILE}
     sysctl -w net.ipv4.ip_forward=1 >/dev/null
@@ -164,36 +166,30 @@ disable_forward() {
 }
 
 # IPT
+clean_iptables_rules() {
+    echo "[!] Удаляем ВСЕ правила iptables с тегом ${TAG}..."
+    iptables -t nat -S | grep "${TAG}" | sed 's/^-A/-D/' | while read -r rule; do
+        eval iptables -t nat "$rule" 2>/dev/null || true
+    done
+    iptables -S | grep "${TAG}" | sed 's/^-A/-D/' | while read -r rule; do
+        eval iptables "$rule" 2>/dev/null || true
+    done
+}
+
 apply_iptables_rules() {
+    clean_iptables_rules
     iptables -t nat -A PREROUTING \
         -d ${SRC_IP} -p udp --dport ${SRC_PORT} \
-        -m comment --comment "${TAG}" \
-        -j DNAT --to-destination ${DST_IP}:${DST_PORT}
+        -j DNAT --to-destination ${DST_IP}:${DST_PORT} \
+        -m comment --comment "${TAG}"
 
     iptables -t nat -A POSTROUTING \
         -p udp -d ${DST_IP} --dport ${DST_PORT} \
-        -m comment --comment "${TAG}" \
-        -j MASQUERADE
+        -j MASQUERADE \
+        -m comment --comment "${TAG}"
 
-    iptables -A FORWARD \
-        -p udp -d ${DST_IP} --dport ${DST_PORT} \
-        -m comment --comment "${TAG}" \
-        -j ACCEPT
-
-    iptables -A FORWARD \
-        -p udp -s ${DST_IP} --sport ${DST_PORT} \
-        -m comment --comment "${TAG}" \
-        -j ACCEPT
-}
-
-rollback_iptables_rules() {
-    echo "[!] Удаляем ВСЕ правила iptables с тегом ${TAG}..."
-    iptables -t nat -S | grep "${TAG}" | sed 's/^-A/-D/' | while read rule; do
-        iptables -t nat $rule 2>/dev/null
-    done
-    iptables -S | grep "${TAG}" | sed 's/^-A/-D/' | while read rule; do
-        iptables $rule 2>/dev/null
-    done
+    iptables -A FORWARD -p udp -d ${DST_IP} --dport ${DST_PORT} -j ACCEPT -m comment --comment "${TAG}"
+    iptables -A FORWARD -p udp -s ${DST_IP} --sport ${DST_PORT} -j ACCEPT -m comment --comment "${TAG}"
 }
 
 show_iptables_rules() {
@@ -210,10 +206,17 @@ save_iptables_rules() {
 
 # NFT
 clean_nftables_rules() {
+    echo "[!] Удаляем ВСЕ правила nftables с тегом ${TAG}..."
     for table in nat filter; do
         for chain in prerouting postrouting forward; do
-            nft -a list chain ip $table $chain 2>/dev/null | grep -B1 "comment \"$TAG\"" | grep -o 'handle [0-9]*' | awk '{print $2}' | while read handle; do
-                nft delete rule ip $table $chain handle $handle 2>/dev/null
+            nft -a list chain ip "$table" "$chain" 2>/dev/null | \
+            grep -B1 "comment \"$TAG\"" | \
+            grep -o 'handle [0-9]*' | \
+            awk '{print $2}' | \
+            while read -r handle; do
+                if [[ "$handle" =~ ^[0-9]+$ ]]; then
+                    nft delete rule ip "$table" "$chain" handle "$handle" 2>/dev/null || true
+                fi
             done
         done
     done
@@ -223,26 +226,14 @@ apply_nftables_rules() {
     clean_nftables_rules
     nft add table ip nat 2>/dev/null || true
     nft add table ip filter 2>/dev/null || true
-
     nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; } 2>/dev/null || true
     nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; } 2>/dev/null || true
-nft add chain ip filter forward { type filter hook forward priority filter \; policy accept \; } 2>/dev/null || true
+    nft add chain ip filter forward { type filter hook forward priority filter \; } 2>/dev/null || true
 
     nft add rule ip nat prerouting ip daddr $SRC_IP udp dport $SRC_PORT dnat to $DST_IP:$DST_PORT comment \"$TAG\"
     nft add rule ip nat postrouting ip daddr $DST_IP udp dport $DST_PORT masquerade comment \"$TAG\"
     nft add rule ip filter forward ip daddr $DST_IP udp dport $DST_PORT accept comment \"$TAG\"
     nft add rule ip filter forward ip saddr $DST_IP udp sport $DST_PORT accept comment \"$TAG\"
-}
-
-rollback_nftables_rules() {
-    echo "[!] Удаляем ВСЕ правила nftables с тегом ${TAG}..."
-    for table in nat filter; do
-        for chain in prerouting postrouting forward; do
-            nft -a list chain ip $table $chain 2>/dev/null | grep -B1 "comment \"$TAG\"" | grep -o 'handle [0-9]*' | awk '{print $2}' | while read handle; do
-                nft delete rule ip $table $chain handle $handle 2>/dev/null
-            done
-        done
-    done
 }
 
 show_nftables_rules() {
@@ -258,7 +249,7 @@ save_nftables_rules() {
 }
 
 apply_rules() {
-    enable_ip_forwarding
+    enable_forward
     echo "[*] Добавляем правила с тегом ${TAG}..."
     if [ "$FIREWALL_TYPE" = "nftables" ]; then
         apply_nftables_rules
@@ -275,11 +266,11 @@ apply_rules() {
 
 rollback_rules() {
     if [ "$FIREWALL_TYPE" = "nftables" ]; then
-        rollback_nftables_rules
+        clean_nftables_rules
     else
-        rollback_iptables_rules
+        clean_iptables_rules
     fi
-    disable_ip_forwarding
+    disable_forward
     if [ "$FIREWALL_TYPE" = "nftables" ]; then
         save_nftables_rules
     else
@@ -306,44 +297,46 @@ custom_input() {
     DST_PORT=${DST_PORT:-4500}
 }
 
-install_dependencies
+main() {
+    install_dependencies
 
-while true; do
-    echo ""
-    echo "===== Wireguard/WARP RELAY MENU ====="
-    echo "1) Автонастройка (Cloudflare UDP 4500)"
-    echo "2) Ввести параметры вручную"
-    echo "3) Показать Relay правила файрволла"
-    echo "4) Откат изменений (удаление)"
-    echo "5) Выход"
-    echo "=========================="
+    while true; do
+        echo ""
+        echo "===== Wireguard/WARP RELAY MENU ====="
+        echo "1) Автонастройка (Cloudflare UDP 4500)"
+        echo "2) Ввести параметры вручную"
+        echo "3) Показать Relay правила файрволла"
+        echo "4) Откат изменений (удаление)"
+        echo "5) Выход"
+        echo "=========================="
+        read -p "Выберите пункт: " choice
 
-    read -p "Выберите пункт: " choice
+        case $choice in
+            1)
+                SRC_PORT=4500
+                DST_PORT=4500
+                echo "SRC_IP=${SRC_IP}"
+                echo "DST_IP=${DST_IP}"
+                apply_rules
+                ;;
+            2)
+                custom_input
+                apply_rules
+                ;;
+            3)
+                show_rules
+                ;;
+            4)
+                rollback_rules
+                ;;
+            5)
+                exit 0
+                ;;
+            *)
+                echo "Неверный выбор"
+                ;;
+        esac
+    done
+}
 
-    case $choice in
-        1)
-            detect_ips
-            SRC_PORT=4500
-            DST_PORT=4500
-            echo "SRC_IP=${SRC_IP}"
-            echo "DST_IP=${DST_IP}"
-            apply_rules
-            ;;
-        2)
-            custom_input
-            apply_rules
-            ;;
-        3)
-            show_rules
-            ;;
-        4)
-            rollback_rules
-            ;;
-        5)
-            exit 0
-            ;;
-        *)
-            echo "Неверный выбор"
-            ;;
-    esac
-done
+main

@@ -36,8 +36,35 @@
 
 На схеме представлена корпоративная сеть организации `192.168.11.0/24`. Рабочие станции сотрудников (`192.168.11.101`, `192.168.11.102`) не имеют прямого доступа к внешней сети Интернет по соображениям информационной безопасности. Однако сотрудникам необходимо подключаться к корпоративному VPN-серверу Wireguard, расположенному в центральном офисе с публичным IP-адресом `40.30.20.10`.
 
-Для решения этой задачи в локальной сети развёрнут **Wireguard / WARP Relay сервер** (`192.168.11.10`), имеющий выход в Интернет. На Relay-сервере выполняется настройка iptables для перенаправления трафика:
+Для решения этой задачи в локальной сети развёрнут **Wireguard / WARP Relay сервер** (`192.168.11.10`), имеющий выход в Интернет. На Relay-сервере выполняется настройка nftables или iptables для перенаправления трафика:
 
+`nftables`
+```bash
+export TAG="WR_RULE"
+export SRC_IP=192.168.11.10
+export DST_IP=40.30.20.10
+export SRC_PORT=2288
+export DST_PORT=51820
+export NFT_CONF="/etc/nftables.conf"
+
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/ipv4-forwarding.conf
+sysctl -w net.ipv4.ip_forward=1
+
+nft add table ip nat 2>/dev/null || true
+nft add table ip filter 2>/dev/null || true
+nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; } 2>/dev/null || true
+nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; } 2>/dev/null || true
+nft add chain ip filter forward { type filter hook forward priority filter \; } 2>/dev/null || true
+
+nft add rule ip nat prerouting ip daddr $SRC_IP udp dport $SRC_PORT dnat to $DST_IP:$DST_PORT comment \"$TAG\"
+nft add rule ip nat postrouting ip daddr $DST_IP udp dport $DST_PORT masquerade comment \"$TAG\"
+nft add rule ip filter forward ip daddr $DST_IP udp dport $DST_PORT accept comment \"$TAG\"
+nft add rule ip filter forward ip saddr $DST_IP udp sport $DST_PORT accept comment \"$TAG\"
+
+nft list ruleset > "$NFT_CONF"
+```
+
+`iptables`
 ```bash
 export TAG="WR_RULE"
 export SRC_IP=192.168.11.10
@@ -101,13 +128,16 @@ sudo netfilter-persistent save
 
 - **Ubuntu** 20.04 LTS / 22.04 LTS / 24.04 LTS
 - **Debian** 11 / 12
-- Другие дистрибутивы на базе Debian (с адаптацией команд)
+- **Arch Linux**
+- **Fedora**
+- **Alpine**
+- Другие дистрибутивы на базе Debian, Arch, RHEL, alpine (с адаптацией команд)
 
 ### Требования к программному обеспечению
 
-- `iptables` — для настройки правил NAT и forwarding
+- `iptables` или `nftables` — для настройки правил NAT и forwarding
 - `curl` — для определения внешнего IP-адреса
-- `netfilter-persistent` — для сохранения правил после перезагрузки
+- `netfilter-persistent` — для сохранения правил после перезагрузки(при использовании iptables)
 - `getent` — для DNS-разрешения (обычно входит в базовую поставку)
 
 ### Сетевые требования
@@ -185,9 +215,9 @@ sudo ./simple.sh
 ```
 
 **Что делает скрипт:**
-- Определяет внешний IP сервера (`ifconfig.me`)
+- Определяет внешний IP сервера (`ifconfig.me`, `icanhazip.com`, `api.ipify.org`)
 - Определяет IP Cloudflare WARP (`engage.cloudflareclient.com`)
-- Настраивает iptables правила для UDP порта 4500
+- Настраивает nftables или iptables правила для UDP порта 4500
 - Включает IP forwarding
 - Сохраняет правила для автозагрузки
 
@@ -195,6 +225,40 @@ sudo ./simple.sh
 
 Если необходимо настроить вручную:
 
+nftables
+```bash
+# Настроить iptables (пример для Cloudflare WARP)
+export TAG="WR_RULE"
+export SRC_IP=YOUR_SERVER_IP
+export DST_IP="$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')"
+export SRC_PORT=4500
+export DST_PORT=4500
+export NFT_CONF="/etc/nftables.conf"
+
+# Включить IP forwarding
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/ipv4-forwarding.conf
+sysctl -w net.ipv4.ip_forward=1
+
+# Добавить таблицы для фильтрации
+nft add table ip nat 2>/dev/null || true
+nft add table ip filter 2>/dev/null || true
+# DNAT правило
+nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; } 2>/dev/null || true
+# MASQUERADE правило
+nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; } 2>/dev/null || true
+nft add chain ip filter forward { type filter hook forward priority filter \; } 2>/dev/null || true
+
+# Разрешить forwarding
+nft add rule ip nat prerouting ip daddr $SRC_IP udp dport $SRC_PORT dnat to $DST_IP:$DST_PORT comment \"$TAG\"
+nft add rule ip nat postrouting ip daddr $DST_IP udp dport $DST_PORT masquerade comment \"$TAG\"
+nft add rule ip filter forward ip daddr $DST_IP udp dport $DST_PORT accept comment \"$TAG\"
+nft add rule ip filter forward ip saddr $DST_IP udp sport $DST_PORT accept comment \"$TAG\"
+
+# Сохранить правила
+nft list ruleset > "$NFT_CONF"
+```
+
+iptables
 ```bash
 # Включить IP forwarding
 echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/ipv4-forwarding.conf
@@ -262,6 +326,9 @@ sudo ./wr.sh
 # Выбрать пункт 3 - Показать Relay правила файрволла
 
 # Или вручную:
+# nftables
+nft list ruleset | grep WR_RULE
+# iptables
 iptables -t nat -L -n -v | grep WR_RULE
 iptables -L FORWARD -n -v | grep WR_RULE
 ```
@@ -279,6 +346,33 @@ sudo ./wr.sh
 
 Или вручную:
 
+nftables
+```bash
+# Удалить правила с тегом WR_RULE
+
+for table in nat filter; do
+  for chain in prerouting postrouting forward; do
+    nft -a list chain ip "$table" "$chain" 2>/dev/null | \
+            grep -B1 "comment \"$TAG\"" | \
+            grep -o 'handle [0-9]*' | \
+            awk '{print $2}' | \
+            while read -r handle; do
+              if [[ "$handle" =~ ^[0-9]+$ ]]; then
+                nft delete rule ip "$table" "$chain" handle "$handle" 2>/dev/null || true
+            fi
+        done
+    done
+done
+
+# Отключить IP forwarding
+echo "net.ipv4.ip_forward=0" > /etc/sysctl.d/ipv4-forwarding.conf
+sysctl -w net.ipv4.ip_forward=0
+
+# Сохранить изменения
+nft list ruleset > /etc/nftables.conf
+```
+
+iptables
 ```bash
 # Удалить правила с тегом WR_RULE
 iptables -t nat -S | grep "WR_RULE" | sed 's/^-A/-D/' | while read rule; do
@@ -317,7 +411,7 @@ warp-relay/
 
 ## ⚠️ Безопасность
 
-- 🔐 Все iptables правила помечены тегом `WR_RULE` для легкого управления
+- 🔐 Все nftables и iptables правила помечены тегом `WR_RULE` для легкого управления
 - 📝 Скрипты требуют прав root (sudo)
 - 🔄 IP forwarding включается только для необходимого трафика
 - 💾 Правила автоматически сохраняются для переживания перезагрузок
@@ -339,6 +433,15 @@ curl -4s icanhazip.com
 ### Проблема: Правила не сохраняются после перезагрузки
 
 ```bash
+# nftables
+# Проверить состояние службы и включить ее
+systemctl status nftables
+systemctl enable --now nftables
+
+# Пересохранить правила вручную
+nft list ruleset > /etc/nftables.conf
+
+# iptables
 # Проверить установку netfilter-persistent
 dpkg -l | grep netfilter-persistent
 
@@ -352,6 +455,8 @@ sudo netfilter-persistent save
 # Проверить включен ли IP forwarding
 sysctl net.ipv4.ip_forward
 
+# Проверить правила nftables
+nft list ruleset
 # Проверить правила iptables
 sudo iptables -t nat -L -n -v
 sudo iptables -L FORWARD -n -v
