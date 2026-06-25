@@ -18,6 +18,26 @@
 
 ---
 
+## ⚡ Быстрый старт
+
+Запуск на relay-сервере одной командой.
+
+**Один UDP-порт (4500):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openwarpkit/warp-relay/main/simple.sh | sudo bash
+```
+
+**Все порты WARP (мультипорт):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openwarpkit/warp-relay/main/simple_multiport.sh | sudo bash
+```
+
+<sub>Меню, ручные параметры и откат — в разделе <a href="#-использование">Использование</a></sub>
+
+---
+
 ## 📋 Описание
 
 **WARP Relay** — это решение для организаций, где по соображениям информационной безопасности запрещен прямой доступ к внешним ресурсам (глобальный интернет), но сотрудникам необходимо подключаться к корпоративным VPN-серверам (Wireguard или Cloudflare WARP).
