@@ -1,3 +1,9 @@
+#!/bin/bash
+
+export DEBIAN_FRONTEND=noninteractive
+apt update -qq
+apt install -y -qq iptables curl netfilter-persistent
+
 export TAG="WR_RULE"
 export SRC_IP=$(curl -4s ifconfig.me)
 export DST_IP=$(getent ahostsv4 engage.cloudflareclient.com | awk '{print $1; exit}')

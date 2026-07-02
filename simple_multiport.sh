@@ -72,6 +72,7 @@ install_dependencies() {
         if [ -n "${SAVE_CMD:-}" ]; then
             export SAVE_CMD
         fi
+        enable_firewall_persistence
         return 0
     fi
 
@@ -135,6 +136,10 @@ install_dependencies() {
         exit 1
     fi
 
+    enable_firewall_persistence
+}
+
+enable_firewall_persistence() {
     if [ "$FIREWALL_TYPE" = "nftables" ]; then
         echo "[*] Используется nftables"
         if [ ! -f "$NFT_CONF" ]; then
@@ -149,6 +154,12 @@ install_dependencies() {
         fi
     else
         echo "[*] Используется iptables"
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl enable netfilter-persistent 2>/dev/null || true
+            systemctl enable iptables 2>/dev/null || true
+        elif command -v rc-update >/dev/null 2>&1; then
+            rc-update add iptables default 2>/dev/null || true
+        fi
     fi
 }
 
